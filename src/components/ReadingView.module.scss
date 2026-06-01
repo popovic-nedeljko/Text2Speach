@@ -1,0 +1,42 @@
+@use '../styles/variables' as *;
+
+.view {
+  width: 100%;
+  background: $surface;
+  border: 1px solid $border;
+  border-radius: $radius;
+  padding: 1.4rem;
+  font-size: 0.97rem;
+  line-height: 1.9;
+  max-height: 360px;
+  overflow-y: auto;
+  word-break: break-word;
+  animation: fadeInUp 0.3s ease both;
+}
+
+.sentence {
+  display: inline;
+  border-radius: 3px;
+  padding: 1px 3px;
+  transition: background 0.25s, color 0.25s;
+
+  &.active {
+    background: rgba(79, 70, 229, 0.35);
+    color: #fff;
+  }
+
+  &.done {
+    color: $muted;
+  }
+}
+
+.pauseMark {
+  display: inline-block;
+  margin: 0 5px;
+  padding: 1px 8px;
+  border-radius: 4px;
+  background: $amber-dim;
+  color: $amber;
+  font-size: 0.78rem;
+  vertical-align: middle;
+}

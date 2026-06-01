@@ -1,0 +1,51 @@
+@use '../styles/variables' as *;
+
+.overlay {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.5rem;
+  background: $surface;
+  border: 1px solid $amber;
+  border-radius: $radius;
+  padding: 1.2rem 1.5rem;
+  box-shadow: 0 0 30px $amber-dim;
+  animation: fadeInUp 0.3s ease both, amberPulse 2s ease-in-out infinite;
+}
+
+.label {
+  font-size: 0.75rem;
+  color: $amber;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+}
+
+.timer {
+  font-size: 2.4rem;
+  font-weight: 700;
+  color: $amber;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.04em;
+}
+
+.skipBtn {
+  margin-top: 0.25rem;
+  background: $amber-dim;
+  border: 1px solid $amber;
+  color: $amber;
+  font-size: 0.85rem;
+  font-family: inherit;
+  padding: 0.35rem 1rem;
+  border-radius: $radius-sm;
+  cursor: pointer;
+  transition: background 0.2s;
+
+  &:hover {
+    background: rgba(245, 158, 11, 0.28);
+  }
+
+  &:active {
+    transform: scale(0.97);
+  }
+}

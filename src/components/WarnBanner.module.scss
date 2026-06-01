@@ -1,0 +1,12 @@
+@use '../styles/variables' as *;
+
+.banner {
+  width: 100%;
+  background: rgba(239, 68, 68, 0.1);
+  border: 1px solid rgba(239, 68, 68, 0.4);
+  color: #fca5a5;
+  padding: 0.75rem 1rem;
+  border-radius: $radius;
+  font-size: 0.875rem;
+  text-align: center;
+}

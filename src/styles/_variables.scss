@@ -1,0 +1,20 @@
+// ── Design tokens ────────────────────────────────────────────
+$bg:          #0d0d0d;
+$surface:     #161616;
+$surface-alt: #1c1c1c;
+$border:      #2a2a2a;
+$accent:      #4f46e5;
+$accent-h:    #6366f1;
+$accent-dim:  rgba(79, 70, 229, 0.15);
+$text:        #e8e8e8;
+$muted:       #6b7280;
+$amber:       #f59e0b;
+$amber-dim:   rgba(245, 158, 11, 0.15);
+$danger:      #ef4444;
+$radius:      10px;
+$radius-sm:   6px;
+$font:        'Inter', system-ui, -apple-system, sans-serif;
+
+// ── Breakpoints ───────────────────────────────────────────────
+$bp-sm: 480px;
+$bp-md: 760px;

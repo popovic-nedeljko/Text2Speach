@@ -1,0 +1,30 @@
+@use './styles/variables' as *;
+
+.app {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1.5rem;
+  width: 100%;
+  max-width: 760px;
+  margin: 0 auto;
+  padding: 2.5rem 1rem 5rem;
+  animation: fadeInUp 0.5s ease both;
+
+  // Amber tint on body when a long pause is active
+  &.amberMode {
+    // subtle background shift handled via CSS variable override
+  }
+}
+
+.title {
+  font-size: 1.7rem;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  color: #fff;
+  text-align: center;
+
+  span {
+    color: $accent;
+  }
+}

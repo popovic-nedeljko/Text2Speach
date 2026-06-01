@@ -1,0 +1,46 @@
+@use '../styles/variables' as *;
+
+.wrap {
+  position: relative;
+  width: 100%;
+}
+
+.textarea {
+  width: 100%;
+  min-height: 270px;
+  resize: vertical;
+  background: $surface;
+  border: 1px solid $border;
+  border-radius: $radius;
+  color: $text;
+  font-family: $font;
+  font-size: 0.95rem;
+  line-height: 1.75;
+  padding: 1rem 1rem 2.5rem;
+  outline: none;
+  transition: border-color 0.2s;
+
+  &::placeholder {
+    color: $muted;
+    font-style: italic;
+  }
+
+  &:focus {
+    border-color: $accent;
+  }
+}
+
+.counter {
+  position: absolute;
+  bottom: 0.6rem;
+  right: 0.9rem;
+  display: flex;
+  gap: 0.4rem;
+  font-size: 0.75rem;
+  color: $muted;
+  pointer-events: none;
+}
+
+.dot {
+  opacity: 0.4;
+}
