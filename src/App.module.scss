@@ -17,6 +17,18 @@
   }
 }
 
+.errorBanner {
+  width: 100%;
+  background: rgba(239, 68, 68, 0.08);
+  border: 1px solid rgba(239, 68, 68, 0.35);
+  border-radius: $radius;
+  padding: 0.7rem 1rem;
+  font-size: 0.85rem;
+  color: #fca5a5;
+  text-align: center;
+  animation: fadeInUp 0.3s ease both;
+}
+
 .title {
   font-size: 1.7rem;
   font-weight: 600;

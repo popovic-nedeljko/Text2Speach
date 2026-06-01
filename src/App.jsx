@@ -7,9 +7,11 @@ import Controls from './components/Controls';
 import ProgressBar from './components/ProgressBar';
 import PauseOverlay from './components/PauseOverlay';
 import Sliders from './components/Sliders';
-import VoiceInfo from './components/VoiceInfo';
 import WarnBanner from './components/WarnBanner';
 import DownloadButton from './components/DownloadButton';
+import EngineToggle from './components/EngineToggle';
+import ElevenLabsPanel from './components/ElevenLabsPanel';
+import GooglePanel from './components/GooglePanel';
 import styles from './App.module.scss';
 
 export default function App() {
@@ -26,8 +28,9 @@ export default function App() {
     tts.play(text);
   }
 
-  function handleStop() {
-    tts.stop();
+  function handleEngineChange(e) {
+    if (tts.status !== 'idle') tts.stop();
+    tts.setEngine(e);
   }
 
   return (
@@ -37,6 +40,8 @@ export default function App() {
       </h1>
 
       <WarnBanner />
+
+      <EngineToggle engine={tts.engine} onChange={handleEngineChange} />
 
       {isReading ? (
         <ReadingView chunks={tts.chunks} activeIndex={tts.activeIndex} />
@@ -59,26 +64,50 @@ export default function App() {
         <PauseOverlay countdown={tts.countdown} onSkip={tts.skipPause} />
       )}
 
+      {tts.error && (
+        <div className={styles.errorBanner}>⚠ {tts.error}</div>
+      )}
+
       <Controls
         status={tts.status}
         onPlay={handlePlay}
         onPause={tts.pause}
         onResume={tts.resume}
-        onStop={handleStop}
+        onStop={tts.stop}
       />
 
-      <Sliders
-        rate={tts.rate}
-        pitch={tts.pitch}
-        onRateChange={tts.setRate}
-        onPitchChange={tts.setPitch}
-      />
-
-      <VoiceInfo
-        voice={tts.voice}
-        allVoices={tts.allVoices}
-        onVoiceChange={tts.selectVoice}
-      />
+      {tts.engine === 'elevenlabs' ? (
+        <>
+          <Sliders
+            rate={tts.elRate}
+            pitch={tts.elPitch}
+            onRateChange={tts.setElRate}
+            onPitchChange={tts.setElPitch}
+          />
+          <ElevenLabsPanel
+            voices={tts.elVoices}
+            selectedVoice={tts.elSelected}
+            apiKey={tts.elApiKey}
+            onVoiceSelect={tts.selectElVoice}
+            onVoiceAdd={tts.addElVoice}
+            onVoiceRemove={tts.removeElVoice}
+            onApiKeyChange={tts.setElApiKey}
+          />
+        </>
+      ) : (
+        <GooglePanel
+          apiKey={tts.gApiKey}
+          voice={tts.gVoice}
+          prompt={tts.gPrompt}
+          pitch={tts.gPitch}
+          rate={tts.gRate}
+          onApiKeyChange={tts.setGApiKey}
+          onVoiceChange={tts.setGVoice}
+          onPromptChange={tts.setGPrompt}
+          onPitchChange={tts.setGPitch}
+          onRateChange={tts.setGRate}
+        />
+      )}
 
       <DownloadButton
         status={dl.status}

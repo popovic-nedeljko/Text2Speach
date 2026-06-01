@@ -1,0 +1,55 @@
+@use '../styles/variables' as *;
+
+.wrap {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  width: 100%;
+  flex-wrap: wrap;
+}
+
+.label {
+  font-size: 0.78rem;
+  color: $muted;
+  white-space: nowrap;
+}
+
+.group {
+  display: flex;
+  border: 1px solid $border;
+  border-radius: $radius;
+  overflow: hidden;
+  flex-shrink: 0;
+}
+
+.btn {
+  padding: 0.45rem 1.1rem;
+  background: $surface;
+  border: none;
+  color: $muted;
+  font-family: $font;
+  font-size: 0.85rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.18s, color 0.18s;
+
+  & + & {
+    border-left: 1px solid $border;
+  }
+
+  &:hover:not(.active) {
+    background: $surface-alt;
+    color: $text;
+  }
+
+  &.active {
+    background: $accent;
+    color: #fff;
+  }
+}
+
+.badge {
+  font-size: 0.7rem;
+  color: $muted;
+  opacity: 0.6;
+}

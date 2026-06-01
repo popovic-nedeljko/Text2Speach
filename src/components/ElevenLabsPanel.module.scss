@@ -1,0 +1,180 @@
+@use '../styles/variables' as *;
+
+.wrap { width: 100%; }
+
+// ── Collapsible header ────────────────────────────────────────
+.toggle {
+  width: 100%;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0.7rem 1rem;
+  background: $surface;
+  border: 1px solid $border;
+  border-radius: $radius;
+  color: $text;
+  font-family: $font;
+  font-size: 0.88rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: border-color 0.18s, background 0.18s;
+
+  &:hover { border-color: $accent; background: $surface-alt; }
+}
+
+.arrow { font-size: 0.7rem; color: $muted; }
+
+// ── Panel body ────────────────────────────────────────────────
+.panel {
+  margin-top: 0.5rem;
+  border: 1px solid $border;
+  border-radius: $radius;
+  background: $surface;
+  padding: 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1.1rem;
+  animation: fadeInUp 0.2s ease both;
+}
+
+.section { display: flex; flex-direction: column; gap: 0.45rem; }
+
+.sectionLabel {
+  font-size: 0.75rem;
+  color: $muted;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+// ── Shared inputs ─────────────────────────────────────────────
+.input {
+  flex: 1;
+  background: $surface-alt;
+  border: 1px solid $border;
+  border-radius: $radius-sm;
+  color: $text;
+  font-family: $font;
+  font-size: 0.85rem;
+  padding: 0.4rem 0.7rem;
+  outline: none;
+  min-width: 0;
+  transition: border-color 0.18s;
+
+  &::placeholder { color: $muted; }
+  &:focus { border-color: $accent; }
+  &:disabled { opacity: 0.4; }
+}
+
+.select {
+  @extend .input;
+  cursor: pointer;
+  option { background: #1a1a2e; }
+}
+
+// ── Key row ───────────────────────────────────────────────────
+.keyRow {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+// ── Add grid ──────────────────────────────────────────────────
+.addGrid {
+  display: grid;
+  grid-template-columns: 1fr 1fr auto;
+  gap: 0.5rem;
+  align-items: center;
+
+  @media (max-width: $bp-sm) {
+    grid-template-columns: 1fr;
+  }
+}
+
+// ── Buttons ───────────────────────────────────────────────────
+.primaryBtn {
+  background: $accent;
+  border: none;
+  border-radius: $radius-sm;
+  color: #fff;
+  font-family: $font;
+  font-size: 0.82rem;
+  font-weight: 500;
+  padding: 0.4rem 0.9rem;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.18s;
+
+  &:hover:not(:disabled) { background: $accent-h; }
+  &:disabled { opacity: 0.35; cursor: not-allowed; }
+}
+
+.ghostBtn {
+  background: transparent;
+  border: 1px solid $border;
+  border-radius: $radius-sm;
+  color: $muted;
+  font-family: $font;
+  font-size: 0.8rem;
+  padding: 0.4rem 0.7rem;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: border-color 0.18s, color 0.18s;
+
+  &:hover { border-color: $accent; color: $text; }
+}
+
+// ── Voice list ────────────────────────────────────────────────
+.list {
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.item {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.45rem 0.7rem;
+  background: $surface-alt;
+  border: 1px solid $border;
+  border-radius: $radius-sm;
+  font-size: 0.82rem;
+  transition: border-color 0.18s;
+
+  &.itemActive {
+    border-color: $accent;
+    background: rgba(79, 70, 229, 0.08);
+  }
+}
+
+.voiceName {
+  font-weight: 500;
+  color: $text;
+  min-width: 70px;
+}
+
+.voiceId {
+  flex: 1;
+  color: $muted;
+  font-size: 0.75rem;
+  font-family: monospace;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.removeBtn {
+  background: transparent;
+  border: 1px solid rgba(239, 68, 68, 0.3);
+  border-radius: $radius-sm;
+  color: #fca5a5;
+  font-family: $font;
+  font-size: 0.75rem;
+  padding: 0.2rem 0.55rem;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: background 0.18s, border-color 0.18s;
+
+  &:hover { background: rgba(239, 68, 68, 0.12); border-color: #ef4444; }
+}

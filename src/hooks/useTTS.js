@@ -1,87 +1,163 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useRef, useState } from 'react';
 
-// ── Text → chunk array ────────────────────────────────────────
+// ── ElevenLabs defaults ───────────────────────────────────────
+export const EL_DEFAULT_VOICES = [
+  { name: 'Adam',    id: 'pNInz6obpgDQGcFmaJgB' },
+  { name: 'Clyde',   id: '2EiwWnXFnvU5JabPnv8n' },
+  { name: 'Arnold',  id: 'VR6AewLTigWG4xSOukaG' },
+  { name: 'Antoni',  id: 'ErXwobaYiN019PkySvjV'  },
+  { name: 'Daniel',  id: 'onwK4e9ZLuTAKqWW03F9'  },
+  { name: 'Patrick', id: 'ODq5zmih8GrVes37Dy39'  },
+];
+
+// ── Google Gemini TTS voices ──────────────────────────────────
+export const GOOGLE_VOICES = [
+  { name: 'Umbriel',  desc: 'default'         },
+  { name: 'Achernar', desc: 'deep, warm'      },
+  { name: 'Charon',   desc: 'dark, powerful'  },
+  { name: 'Fenrir',   desc: 'strong, nordic'  },
+  { name: 'Orus',     desc: 'deep, calm'      },
+  { name: 'Sulafat',  desc: 'smooth, mellow'  },
+];
+
+export const DEFAULT_STYLE_PROMPT =
+  'Speak in a slow, deep, hypnotic tone like a calm hypnotherapist. ' +
+  'Pause naturally between thoughts. Sound warm, grounded, and authoritative.';
+
+// ── localStorage helpers ──────────────────────────────────────
+const LS = {
+  ENGINE:      'tts_engine',
+  EL_VOICES:   'tts_el_voices',
+  EL_SELECTED: 'tts_el_selected',
+  EL_APIKEY:   'tts_el_apikey',
+  EL_RATE:     'tts_el_rate',
+  EL_PITCH:    'tts_el_pitch',
+  G_APIKEY:    'tts_g_apikey',
+  G_VOICE:     'tts_g_voice',
+  G_PROMPT:    'tts_g_prompt',
+  G_PITCH:     'tts_g_pitch',
+  G_RATE:      'tts_g_rate',
+};
+
+function lsGet(key, fallback) {
+  try { const v = localStorage.getItem(key); return v !== null ? JSON.parse(v) : fallback; }
+  catch { return fallback; }
+}
+function lsStr(key, fallback = '') { return localStorage.getItem(key) ?? fallback; }
+function lsSet(key, val) { try { localStorage.setItem(key, JSON.stringify(val)); } catch {} }
+function lsSetStr(key, val) { try { localStorage.setItem(key, val); } catch {} }
+
+// ── ElevenLabs TTS fetch ──────────────────────────────────────
+async function fetchElevenLabs(text, voiceId, apiKey, rate, stability, signal) {
+  if (!apiKey)   throw new Error('No ElevenLabs API key — add it in the Voice Manager.');
+  if (!voiceId)  throw new Error('No ElevenLabs voice selected.');
+
+  const resp = await fetch(
+    `https://api.elevenlabs.io/v1/text-to-speech/${voiceId}`,
+    {
+      method: 'POST',
+      signal,
+      headers: {
+        'xi-api-key': apiKey,
+        'Content-Type': 'application/json',
+        'Accept': 'audio/mpeg',
+      },
+      body: JSON.stringify({
+        text,
+        model_id: 'eleven_turbo_v2_5',
+        voice_settings: {
+          stability:        Math.max(0, Math.min(1, stability)),
+          similarity_boost: 0.75,
+          speed:            Math.max(0.7, Math.min(1.2, rate)),
+        },
+      }),
+    }
+  );
+
+  if (!resp.ok) {
+    let msg = `ElevenLabs error ${resp.status}`;
+    try { const j = await resp.json(); msg = j.detail?.message ?? j.detail ?? j.message ?? msg; } catch {}
+    throw new Error(msg);
+  }
+  return resp.blob();
+}
+
+// ── Google Gemini TTS fetch ───────────────────────────────────
+async function fetchGoogle(text, voiceName, apiKey, stylePrompt, pitch, speakingRate, signal) {
+  if (!apiKey) throw new Error('No Google API key — add it in the Voice Manager.');
+
+  const resp = await fetch(
+    'https://texttospeech.googleapis.com/v1beta1/text:synthesize',
+    {
+      method: 'POST',
+      signal,
+      headers: {
+        'X-Goog-Api-Key': apiKey,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        audioConfig: { audioEncoding: 'MP3', pitch, speakingRate },
+        input:       { prompt: stylePrompt, text },
+        voice:       { languageCode: 'en-us', modelName: 'gemini-3.1-flash-tts-preview', name: voiceName },
+      }),
+    }
+  );
+
+  if (!resp.ok) {
+    let msg = `Google TTS error ${resp.status}`;
+    if      (resp.status === 403) msg = 'Invalid Google API key or API not enabled.';
+    else if (resp.status === 429) msg = 'Google quota exceeded.';
+    else { try { const j = await resp.json(); msg = j.error?.message ?? msg; } catch {} }
+    throw new Error(msg);
+  }
+
+  const data   = await resp.json();
+  const bytes  = Uint8Array.from(atob(data.audioContent), c => c.charCodeAt(0));
+  return new Blob([bytes], { type: 'audio/mp3' });
+}
+
+// ── Text → chunks ─────────────────────────────────────────────
 function buildChunks(raw) {
   const parts = raw.split(/(\[PAUSE:\d+(?:\.\d+)?\])/i);
   const result = [];
   let sentIdx = 0;
-
   for (const part of parts) {
     const m = part.match(/^\[PAUSE:(\d+(?:\.\d+)?)\]$/i);
-    if (m) {
-      result.push({ type: 'pause', minutes: parseFloat(m[1]) });
-      continue;
-    }
-    const sentences = part
-      .split(/(?<=[.!?])\s+|(?<=[.!?])$/)
-      .map(s => s.trim())
-      .filter(Boolean);
-    for (const text of sentences) {
-      result.push({ type: 'speak', text, index: sentIdx++ });
-    }
+    if (m) { result.push({ type: 'pause', minutes: parseFloat(m[1]) }); continue; }
+    const sentences = part.split(/(?<=[.!?])\s+|(?<=[.!?])$/).map(s => s.trim()).filter(Boolean);
+    for (const text of sentences) result.push({ type: 'speak', text, index: sentIdx++ });
   }
   return result;
 }
 
-// ── Microsoft Edge neural voice priority list ─────────────────
-const PRIORITY_EXACT = [
-  'microsoft guy online (natural) - english (united states)',
-  'microsoft ryan online (natural) - english (united kingdom)',
-  'microsoft eric online (natural) - english (united states)',
-  'microsoft roger online (natural) - english (united kingdom)',
-  'microsoft davis online (natural) - english (united states)',
-];
-
-// Known male first names in Microsoft neural voice catalogue
-const MS_MALE_NAMES = [
-  'guy', 'ryan', 'eric', 'roger', 'davis', 'andrew', 'christopher',
-  'brandon', 'jacob', 'steffan', 'tony', 'william', 'jason', 'derek',
-];
-
-function pickVoice(voices) {
-  // 1. Exact priority name match (case-insensitive)
-  for (const p of PRIORITY_EXACT) {
-    const v = voices.find(v => v.name.toLowerCase() === p);
-    if (v) return v;
-  }
-
-  // 2. Any Online (Natural) with a male name or "male" tag
-  const naturalMale = voices.find(v => {
-    const n = v.name.toLowerCase();
-    return n.includes('online (natural)') &&
-      (n.includes('male') || MS_MALE_NAMES.some(m => n.split(/\W/).includes(m)));
-  });
-  if (naturalMale) return naturalMale;
-
-  // 3. Any Online (Natural) voice
-  const natural = voices.find(v => v.name.toLowerCase().includes('online (natural)'));
-  if (natural) return natural;
-
-  // 4. Any Microsoft voice
-  const ms = voices.find(v => v.name.toLowerCase().includes('microsoft'));
-  if (ms) return ms;
-
-  // 5. Any English voice, then first available
-  return voices.find(v => v.lang.startsWith('en')) ?? voices[0] ?? null;
-}
-
-export function hasNeuralVoices(voices) {
-  return voices.some(v => v.name.toLowerCase().includes('online (natural)'));
-}
-
 // ── Hook ──────────────────────────────────────────────────────
 export function useTTS() {
+  // Engine toggle
+  const [engine,      setEngineState] = useState(() => lsStr(LS.ENGINE, 'elevenlabs'));
+
+  // ElevenLabs state
+  const [elVoices,    setElVoicesState]  = useState(() => lsGet(LS.EL_VOICES,   EL_DEFAULT_VOICES));
+  const [elSelected,  setElSelectedState]= useState(() => lsGet(LS.EL_SELECTED, EL_DEFAULT_VOICES[0]));
+  const [elApiKey,    setElApiKeyState]  = useState(() => lsStr(LS.EL_APIKEY));
+  const [elRate,      setElRateState]    = useState(() => lsGet(LS.EL_RATE,   0.75));
+  const [elPitch,     setElPitchState]   = useState(() => lsGet(LS.EL_PITCH,  0.8));
+
+  // Google state
+  const [gApiKey,     setGApiKeyState]   = useState(() => lsStr(LS.G_APIKEY));
+  const [gVoice,      setGVoiceState]    = useState(() => lsStr(LS.G_VOICE, GOOGLE_VOICES[0].name));
+  const [gPrompt,     setGPromptState]   = useState(() => lsStr(LS.G_PROMPT) || DEFAULT_STYLE_PROMPT);
+  const [gPitch,      setGPitchState]    = useState(() => lsGet(LS.G_PITCH,  -2));
+  const [gRate,       setGRateState]     = useState(() => lsGet(LS.G_RATE,   0.85));
+
+  // Playback state
   const [status,        setStatus]        = useState('idle');
   const [activeIndex,   setActiveIndex]   = useState(-1);
   const [chunkProgress, setChunkProgress] = useState({ done: 0, total: 0 });
   const [countdown,     setCountdown]     = useState(null);
-  const [voice,         setVoice]         = useState(null);
-  const [allVoices,     setAllVoices]     = useState([]);
-  const [rate,          setRate]          = useState(0.75);
-  const [pitch,         setPitch]         = useState(0.8);
   const [chunks,        setChunks]        = useState([]);
+  const [error,         setError]         = useState(null);
 
-  // Mutable refs — don't need to trigger re-renders
+  // ── Mutable refs ──────────────────────────────────────────
   const playing      = useRef(false);
   const paused       = useRef(false);
   const chunkIdx     = useRef(0);
@@ -90,70 +166,79 @@ export function useTTS() {
   const countdownInt = useRef(null);
   const skipRef      = useRef(false);
   const countdownRem = useRef(0);
-  const voiceRef     = useRef(null);   // avoids stale closure in playFrom
-  const rateRef      = useRef(rate);
-  const pitchRef     = useRef(pitch);
+  const fetchAbort   = useRef(null);
+  const currentAudio = useRef(null);  // Audio playing right now
+  const pausedAudio  = useRef(null);  // Audio paused mid-sentence
+  const pendingNext  = useRef(null);  // next chunk index after sentence ends + gap
+  const playFromRef  = useRef(null);  // self-ref for async recursion
 
-  voiceRef.current  = voice;
-  rateRef.current   = rate;
-  pitchRef.current  = pitch;
+  // Reflected-value refs (avoid stale closures inside async playFrom)
+  const engineRef    = useRef(engine);
+  const elSelRef     = useRef(elSelected);
+  const elApiRef     = useRef(elApiKey);
+  const elRateRef    = useRef(elRate);
+  const elPitchRef   = useRef(elPitch);
+  const gApiRef      = useRef(gApiKey);
+  const gVoiceRef    = useRef(gVoice);
+  const gPromptRef   = useRef(gPrompt);
+  const gPitchRef    = useRef(gPitch);
+  const gRateRef     = useRef(gRate);
 
-  // ── Voice loading with retry ──────────────────────────────
-  useEffect(() => {
-    if (!window.speechSynthesis) return;
+  engineRef.current  = engine;
+  elSelRef.current   = elSelected;
+  elApiRef.current   = elApiKey;
+  elRateRef.current  = elRate;
+  elPitchRef.current = elPitch;
+  gApiRef.current    = gApiKey;
+  gVoiceRef.current  = gVoice;
+  gPromptRef.current = gPrompt;
+  gPitchRef.current  = gPitch;
+  gRateRef.current   = gRate;
 
-    // Track whether the user has already manually selected a voice
-    // (in that case auto-pick should not override their choice)
-    let manuallySelected = false;
+  // ── Setters (with localStorage sync) ─────────────────────
 
-    function applyVoices(voices) {
-      setAllVoices(voices);
-      if (!manuallySelected) {
-        setVoice(pickVoice(voices));
-      }
-    }
-
-    function tryLoad(retriesLeft) {
-      const voices = window.speechSynthesis.getVoices();
-      if (voices.length > 0) {
-        applyVoices(voices);
-        return;
-      }
-      if (retriesLeft > 0) {
-        setTimeout(() => tryLoad(retriesLeft - 1), 500);
-      }
-    }
-
-    function onVoicesChanged() {
-      const voices = window.speechSynthesis.getVoices();
-      if (voices.length > 0) applyVoices(voices);
-    }
-
-    tryLoad(3);
-    window.speechSynthesis.addEventListener('voiceschanged', onVoicesChanged);
-
-    return () => {
-      window.speechSynthesis.removeEventListener('voiceschanged', onVoicesChanged);
-    };
+  const setEngine = useCallback((e) => {
+    setEngineState(e);
+    lsSetStr(LS.ENGINE, e);
   }, []);
 
-  // Manual voice selection from dropdown (skips auto-pick on next reload)
-  const selectVoice = useCallback((v) => {
-    setVoice(v);
+  const setElApiKey = useCallback((k) => { setElApiKeyState(k); lsSetStr(LS.EL_APIKEY, k); }, []);
+  const setGApiKey  = useCallback((k) => { setGApiKeyState(k);  lsSetStr(LS.G_APIKEY,  k); }, []);
+  const setGVoice   = useCallback((v) => { setGVoiceState(v);   lsSetStr(LS.G_VOICE,   v); }, []);
+  const setGPrompt  = useCallback((p) => { setGPromptState(p);  lsSetStr(LS.G_PROMPT,  p); }, []);
+  const setElRate   = useCallback((v) => { setElRateState(v);   lsSet(LS.EL_RATE,  v); }, []);
+  const setElPitch  = useCallback((v) => { setElPitchState(v);  lsSet(LS.EL_PITCH, v); }, []);
+  const setGPitch   = useCallback((v) => { setGPitchState(v);   lsSet(LS.G_PITCH,  v); }, []);
+  const setGRate    = useCallback((v) => { setGRateState(v);    lsSet(LS.G_RATE,   v); }, []);
+
+  const selectElVoice = useCallback((v) => {
+    setElSelectedState(v);
+    lsSet(LS.EL_SELECTED, v);
   }, []);
 
-  // ── Chrome keep-alive (prevents ~15 s cutoff) ─────────────
-  useEffect(() => {
-    const id = setInterval(() => {
-      if (playing.current && !paused.current && window.speechSynthesis?.speaking) {
-        window.speechSynthesis.pause();
-        window.speechSynthesis.resume();
+  const addElVoice = useCallback((v) => {
+    setElVoicesState(prev => {
+      const next = [...prev, v];
+      lsSet(LS.EL_VOICES, next);
+      return next;
+    });
+  }, []);
+
+  const removeElVoice = useCallback((id) => {
+    setElVoicesState(prev => {
+      const next = prev.filter(v => v.id !== id);
+      lsSet(LS.EL_VOICES, next);
+      if (elSelRef.current?.id === id) {
+        const fallback = next[0] ?? null;
+        setElSelectedState(fallback);
+        lsSet(LS.EL_SELECTED, fallback);
       }
-    }, 10_000);
-    return () => clearInterval(id);
+      return next;
+    });
   }, []);
 
   // ── Countdown helpers ──────────────────────────────────────
+
   const stopCountdown = useCallback(() => {
     clearInterval(countdownInt.current);
     countdownInt.current = null;
@@ -176,71 +261,127 @@ export function useTTS() {
       countdownRem.current -= 1;
       setCountdown({ remaining: countdownRem.current, total: totalSec });
     }
-
     countdownInt.current = setInterval(tick, 1000);
   }, [stopCountdown]);
 
-  // ── Core: play chunk at index ──────────────────────────────
-  const playFrom = useCallback((index) => {
+  // ── Audio teardown ─────────────────────────────────────────
+
+  function killAudio() {
+    for (const ref of [currentAudio, pausedAudio]) {
+      if (ref.current) { ref.current.pause(); ref.current.src = ''; ref.current = null; }
+    }
+  }
+
+  // ── Core: play chunk at index (async) ─────────────────────
+
+  const playFrom = useCallback(async (index) => {
     if (!playing.current) return;
 
     chunkIdx.current = index;
-    const allChunks  = chunksRef.current;
+    const all = chunksRef.current;
 
-    if (index >= allChunks.length) {
+    if (index >= all.length) {
       playing.current = false;
       paused.current  = false;
       setStatus('idle');
       setActiveIndex(-1);
-      const speakChunks = allChunks.filter(c => c.type === 'speak');
-      setChunkProgress({ done: speakChunks.length, total: speakChunks.length });
+      const sp = all.filter(c => c.type === 'speak');
+      setChunkProgress({ done: sp.length, total: sp.length });
       return;
     }
 
-    const chunk = allChunks[index];
-    const done  = allChunks.slice(0, index).filter(c => c.type === 'speak').length;
-    const total = allChunks.filter(c => c.type === 'speak').length;
+    const chunk = all[index];
+    const done  = all.slice(0, index).filter(c => c.type === 'speak').length;
+    const total = all.filter(c => c.type === 'speak').length;
     setChunkProgress({ done, total });
 
     if (chunk.type === 'pause') {
       setActiveIndex(-1);
-      const totalSec = Math.round(chunk.minutes * 60);
-      startCountdown(totalSec, () => {
-        if (playing.current) playFrom(index + 1);
+      startCountdown(Math.round(chunk.minutes * 60), () => {
+        if (playing.current) playFromRef.current(index + 1);
       });
       return;
     }
 
     setActiveIndex(chunk.index);
 
-    const utt  = new SpeechSynthesisUtterance(chunk.text);
-    utt.rate   = rateRef.current;
-    utt.pitch  = pitchRef.current;
-    if (voiceRef.current) utt.voice = voiceRef.current;
+    const abort = new AbortController();
+    fetchAbort.current = abort;
 
-    utt.onend = () => {
+    let blob;
+    try {
+      blob = engineRef.current === 'google'
+        ? await fetchGoogle(
+            chunk.text, gVoiceRef.current, gApiRef.current,
+            gPromptRef.current, gPitchRef.current, gRateRef.current,
+            abort.signal
+          )
+        : await fetchElevenLabs(
+            chunk.text, elSelRef.current?.id ?? '', elApiRef.current,
+            elRateRef.current, elPitchRef.current,
+            abort.signal
+          );
+    } catch (err) {
+      if (err.name === 'AbortError') return;
+      setError(err.message);
+      playing.current = false;
+      paused.current  = false;
+      setStatus('idle');
+      return;
+    }
+
+    if (!playing.current) return; // stopped while fetching
+
+    const url   = URL.createObjectURL(blob);
+    const audio = new Audio(url);
+    currentAudio.current = audio;
+
+    audio.onended = () => {
+      URL.revokeObjectURL(url);
+      currentAudio.current = null;
       if (!playing.current) return;
+
+      // Record next index — either fires the gap timer now or waits for resume
+      pendingNext.current = index + 1;
+      if (paused.current) return;
+
       gapTimer.current = setTimeout(() => {
-        if (playing.current) playFrom(index + 1);
+        if (!playing.current || paused.current) return;
+        const next = pendingNext.current;
+        pendingNext.current = null;
+        if (next !== null) playFromRef.current(next);
       }, 1000);
     };
 
-    utt.onerror = (e) => {
-      if (e.error === 'interrupted') return;
-      if (playing.current) playFrom(index + 1);
+    audio.onerror = () => {
+      URL.revokeObjectURL(url);
+      currentAudio.current = null;
+      if (playing.current && !paused.current) playFromRef.current(index + 1);
     };
 
-    window.speechSynthesis.speak(utt);
-  // voiceRef/rateRef/pitchRef are refs — no need to list them as deps
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    if (paused.current) {
+      // Fetch finished while paused — hold audio for resume
+      pausedAudio.current = audio;
+    } else {
+      audio.play().catch(() => {
+        URL.revokeObjectURL(url);
+        if (playing.current) playFromRef.current(index + 1);
+      });
+    }
   }, [startCountdown]);
 
-  // ── Public actions ────────────────────────────────────────
+  playFromRef.current = playFrom;
+
+  // ── Public actions ─────────────────────────────────────────
+
   const play = useCallback((rawText) => {
-    window.speechSynthesis?.cancel();
+    setError(null);
+    fetchAbort.current?.abort();
+    killAudio();
     clearTimeout(gapTimer.current);
-    clearInterval(countdownInt.current);
     stopCountdown();
+    pendingNext.current  = null;
+    countdownRem.current = 0;
 
     const built = buildChunks(rawText);
     chunksRef.current = built;
@@ -251,18 +392,22 @@ export function useTTS() {
     setStatus('playing');
     setActiveIndex(-1);
 
-    setTimeout(() => playFrom(0), 150);
-  }, [playFrom, stopCountdown]);
+    setTimeout(() => playFromRef.current(0), 100);
+  }, [stopCountdown]);
 
   const pause = useCallback(() => {
     if (!playing.current || paused.current) return;
     paused.current = true;
-    window.speechSynthesis?.pause();
-    clearTimeout(gapTimer.current);
-    if (countdownInt.current) {
-      clearInterval(countdownInt.current);
-      countdownInt.current = null;
+    fetchAbort.current?.abort();    // abort in-flight fetch; re-fetched on resume
+    clearTimeout(gapTimer.current); // pendingNext stays set if audio already ended
+
+    if (currentAudio.current && !currentAudio.current.paused) {
+      currentAudio.current.pause();
+      pausedAudio.current  = currentAudio.current;
+      currentAudio.current = null;
     }
+
+    if (countdownInt.current) { clearInterval(countdownInt.current); countdownInt.current = null; }
     setStatus('paused');
   }, []);
 
@@ -271,49 +416,67 @@ export function useTTS() {
     paused.current = false;
     setStatus('playing');
 
+    // Mid-countdown: restart it from where it left off
     if (countdownRem.current > 0 && countdown !== null) {
-      const rem = countdownRem.current;
-      startCountdown(rem, () => {
-        if (playing.current) playFrom(chunkIdx.current + 1);
+      startCountdown(countdownRem.current, () => {
+        if (playing.current) playFromRef.current(chunkIdx.current + 1);
       });
-    } else {
-      window.speechSynthesis?.resume();
+      return;
     }
-  }, [countdown, playFrom, startCountdown]);
+
+    // Audio ended while paused: fire gap timer then advance
+    if (pendingNext.current !== null) {
+      const next = pendingNext.current;
+      pendingNext.current = null;
+      gapTimer.current = setTimeout(() => {
+        if (playing.current && !paused.current) playFromRef.current(next);
+      }, 1000);
+      return;
+    }
+
+    // Audio was paused mid-sentence: resume it
+    if (pausedAudio.current) {
+      currentAudio.current = pausedAudio.current;
+      pausedAudio.current  = null;
+      currentAudio.current.play().catch(() => {});
+      return;
+    }
+
+    // Paused during fetch: re-fetch current chunk
+    if (playing.current) playFromRef.current(chunkIdx.current);
+  }, [countdown, startCountdown]);
 
   const stop = useCallback(() => {
-    playing.current = false;
-    paused.current  = false;
-    window.speechSynthesis?.cancel();
+    playing.current  = false;
+    paused.current   = false;
+    fetchAbort.current?.abort();
+    killAudio();
     clearTimeout(gapTimer.current);
     stopCountdown();
+    pendingNext.current  = null;
     countdownRem.current = 0;
-    chunkIdx.current = 0;
+    chunkIdx.current     = 0;
     setStatus('idle');
     setActiveIndex(-1);
     setChunkProgress({ done: 0, total: 0 });
     setChunks([]);
   }, [stopCountdown]);
 
-  const skipPause = useCallback(() => {
-    skipRef.current = true;
-  }, []);
+  const skipPause = useCallback(() => { skipRef.current = true; }, []);
 
   return {
-    status,
-    activeIndex,
-    chunkProgress,
-    countdown,
-    voice,
-    allVoices,
-    selectVoice,
-    rate, setRate,
-    pitch, setPitch,
-    chunks,
-    play,
-    pause,
-    resume,
-    stop,
-    skipPause,
+    // Engine
+    engine, setEngine,
+    // ElevenLabs
+    elVoices, elSelected, elApiKey,
+    addElVoice, removeElVoice, selectElVoice, setElApiKey,
+    elRate, setElRate,
+    elPitch, setElPitch,
+    // Google
+    gApiKey, gVoice, gPrompt, gPitch, gRate,
+    setGApiKey, setGVoice, setGPrompt, setGPitch, setGRate,
+    // Playback
+    status, activeIndex, chunkProgress, countdown, chunks, error,
+    play, pause, resume, stop, skipPause,
   };
 }
