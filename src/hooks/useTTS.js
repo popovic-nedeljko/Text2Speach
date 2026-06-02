@@ -257,6 +257,8 @@ export function useTTS() {
   const [countdown,       setCountdown]         = useState(null);
   const [chunks,          setChunks]            = useState([]);
   const [error,           setError]             = useState(null);
+  const [elapsedSec,      setElapsedSec]        = useState(0);
+  const [totalSec,        setTotalSec]          = useState(0);
 
   // ── Mutable refs ──────────────────────────────────────────
   const playing          = useRef(false);
@@ -275,6 +277,9 @@ export function useTTS() {
   const playFromRef      = useRef(null);
   const styleParamsRef   = useRef(null);   // session cache for resolved SSML params
   const styleCacheKeyRef = useRef('');     // tracks prompt+key used for cache
+  const timerRef         = useRef(null);   // elapsed-time interval
+  const startMsRef       = useRef(0);      // Date.now() at last play/resume
+  const accSecRef        = useRef(0);      // accumulated seconds before last pause
 
   // Reflected-value refs (avoid stale closures inside async callbacks)
   const engineRef        = useRef(engine);
@@ -455,6 +460,8 @@ export function useTTS() {
     if (index >= all.length) {
       playing.current = false;
       paused.current  = false;
+      clearInterval(timerRef.current);
+      timerRef.current = null;
       setStatus('idle');
       setActiveIndex(-1);
       const sp = all.filter(c => c.type === 'speak');
@@ -598,6 +605,22 @@ export function useTTS() {
     setStatus('playing');
     setActiveIndex(-1);
 
+    // Start elapsed timer + estimate total duration
+    clearInterval(timerRef.current);
+    accSecRef.current  = 0;
+    startMsRef.current = Date.now();
+    const spokenWords = built
+      .filter(c => c.type === 'speak')
+      .reduce((n, c) => n + c.text.split(/\s+/).filter(Boolean).length, 0);
+    const pauseSecs = built
+      .filter(c => c.type === 'pause')
+      .reduce((n, c) => n + c.minutes * 60, 0);
+    setTotalSec(Math.round(spokenWords / 2.0 + pauseSecs));
+    setElapsedSec(0);
+    timerRef.current = setInterval(() => {
+      setElapsedSec(Math.round(accSecRef.current + (Date.now() - startMsRef.current) / 1000));
+    }, 1000);
+
     if (engineRef.current === 'edge') {
       const cacheKey = `${anthropicKeyRef.current}||${edStylePromptRef.current}`;
       if (styleParamsRef.current && styleCacheKeyRef.current === cacheKey) {
@@ -632,6 +655,9 @@ export function useTTS() {
   const pause = useCallback(() => {
     if (!playing.current || paused.current) return;
     paused.current = true;
+    accSecRef.current += (Date.now() - startMsRef.current) / 1000;
+    clearInterval(timerRef.current);
+    timerRef.current = null;
     clearTimeout(gapTimer.current);
     if (countdownInt.current) { clearInterval(countdownInt.current); countdownInt.current = null; }
 
@@ -652,6 +678,11 @@ export function useTTS() {
   const resume = useCallback(() => {
     if (!paused.current) return;
     paused.current = false;
+    startMsRef.current = Date.now();
+    clearInterval(timerRef.current);
+    timerRef.current = setInterval(() => {
+      setElapsedSec(Math.round(accSecRef.current + (Date.now() - startMsRef.current) / 1000));
+    }, 1000);
     setStatus('playing');
 
     if (countdownRem.current > 0 && countdown !== null) {
@@ -691,6 +722,9 @@ export function useTTS() {
     fetchAbort.current?.abort();
     killAudio();
     clearTimeout(gapTimer.current);
+    clearInterval(timerRef.current);
+    timerRef.current = null;
+    accSecRef.current = 0;
     stopCountdown();
     pendingNext.current  = null;
     countdownRem.current = 0;
@@ -699,6 +733,8 @@ export function useTTS() {
     setActiveIndex(-1);
     setChunkProgress({ done: 0, total: 0 });
     setChunks([]);
+    setElapsedSec(0);
+    setTotalSec(0);
     if (edStyleStatus === 'analyzing') setEdStyleStatus('idle');
   }, [stopCountdown, edStyleStatus]);
 
@@ -723,6 +759,7 @@ export function useTTS() {
     edStyleParams, edStyleStatus,
     // Playback
     status, activeIndex, chunkProgress, countdown, chunks, error,
+    elapsedSec, totalSec,
     play, pause, resume, stop, skipPause,
   };
 }

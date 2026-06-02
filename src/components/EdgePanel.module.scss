@@ -166,16 +166,17 @@
 
 // ── Meditation voice preset list ──────────────────────────────
 .voiceList {
-  display: flex;
-  flex-direction: column;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
   gap: 0.35rem;
+
+  @media (max-width: $bp-sm) { grid-template-columns: 1fr; }
 }
 
 .voiceItem {
   display: flex;
   flex-direction: column;
   gap: 0.15rem;
-  width: 100%;
   background: $surface-alt;
   border: 1px solid $border;
   border-radius: $radius-sm;

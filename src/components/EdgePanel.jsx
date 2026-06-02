@@ -3,9 +3,8 @@ import { EDGE_DEFAULT_STYLE_PROMPT } from '../hooks/useTTS';
 import styles from './EdgePanel.module.scss';
 
 const MEDITATION_VOICES = [
-  { full: 'Microsoft Davis Online (Natural) - English (United States)',                      label: 'Davis',   lang: 'en-US', desc: 'Najopušteniji, topao, prirodan — najbliži William-u', best: true },
+  { full: 'Microsoft Davis Online (Natural) - English (United States)',                      label: 'Davis',   lang: 'en-US', desc: 'Najopušteniji, topao, prirodan — najbliži William-u' },
   { full: 'Microsoft Guy Online (Natural) - English (United States)',                        label: 'Guy',     lang: 'en-US', desc: 'Dubok, autoritativan, malo formalniji' },
-  { full: 'Microsoft Jason Online (Natural) - English (United States)',                      label: 'Jason',   lang: 'en-US', desc: 'Mlađi, energičan' },
   { full: 'Microsoft Tony Online (Natural) - English (United States)',                       label: 'Tony',    lang: 'en-US', desc: 'Čist, profesionalan, neutralan' },
   { full: 'Microsoft Andrew Multilingual Online (Natural) - English (United States)',        label: 'Andrew',  lang: 'en-US', desc: 'Najnoviji, konverzacijski, veoma prirodan' },
   { full: 'Microsoft Brian Multilingual Online (Natural) - English (United States)',         label: 'Brian',   lang: 'en-US', desc: 'Moderan, prirodan, svestran' },

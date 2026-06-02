@@ -75,6 +75,8 @@ export default function App() {
         onPause={tts.pause}
         onResume={tts.resume}
         onStop={tts.stop}
+        elapsedSec={tts.elapsedSec}
+        totalSec={tts.totalSec}
       />
 
       {tts.engine === 'elevenlabs' ? (
