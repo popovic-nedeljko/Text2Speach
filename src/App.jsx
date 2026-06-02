@@ -118,6 +118,12 @@ export default function App() {
           onVoiceChange={tts.setEdVoice}
           onRateChange={tts.setEdRate}
           onPitchChange={tts.setEdPitch}
+          anthropicKey={tts.anthropicKey}
+          edStylePrompt={tts.edStylePrompt}
+          edStyleParams={tts.edStyleParams}
+          edStyleStatus={tts.edStyleStatus}
+          onAnthropicKeyChange={tts.setAnthropicKey}
+          onEdStylePromptChange={tts.setEdStylePrompt}
         />
       )}
 

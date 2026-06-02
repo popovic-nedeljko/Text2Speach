@@ -37,7 +37,7 @@
   animation: fadeInUp 0.2s ease both;
 }
 
-.section { display: flex; flex-direction: column; gap: 0.45rem; }
+.section { display: flex; flex-direction: column; gap: 0.5rem; }
 
 .sectionLabel {
   font-size: 0.75rem;
@@ -57,9 +57,97 @@
   line-height: 1.5;
 }
 
-// ── Inputs ────────────────────────────────────────────────────
-.select {
+// ── Shared inputs ─────────────────────────────────────────────
+.input {
   flex: 1;
+  background: $surface-alt;
+  border: 1px solid $border;
+  border-radius: $radius-sm;
+  color: $text;
+  font-family: $font;
+  font-size: 0.85rem;
+  padding: 0.4rem 0.7rem;
+  outline: none;
+  min-width: 0;
+  transition: border-color 0.18s;
+
+  &::placeholder { color: $muted; }
+  &:focus { border-color: #0078d4; }
+}
+
+.textarea {
+  @extend .input;
+  resize: vertical;
+  line-height: 1.6;
+  font-size: 0.82rem;
+  width: 100%;
+}
+
+.keyRow {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.showBtn {
+  background: transparent;
+  border: 1px solid $border;
+  border-radius: $radius-sm;
+  color: $muted;
+  font-family: $font;
+  font-size: 0.8rem;
+  padding: 0.4rem 0.7rem;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: border-color 0.18s, color 0.18s;
+
+  &:hover { border-color: #0078d4; color: $text; }
+}
+
+// ── Style analysis status ─────────────────────────────────────
+.analyzing {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.78rem;
+  color: $muted;
+  font-style: italic;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1;   transform: scale(1);    }
+  50%       { opacity: 0.3; transform: scale(0.75); }
+}
+
+.dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #0078d4;
+  flex-shrink: 0;
+  animation: pulse 1.1s ease-in-out infinite;
+}
+
+.resolved {
+  font-size: 0.76rem;
+  color: #0078d4;
+  background: rgba(0, 120, 212, 0.07);
+  border: 1px solid rgba(0, 120, 212, 0.2);
+  border-radius: $radius-sm;
+  padding: 0.35rem 0.65rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.hint {
+  font-size: 0.73rem;
+  color: $muted;
+  opacity: 0.65;
+  line-height: 1.5;
+}
+
+// ── Dropdown ──────────────────────────────────────────────────
+.select {
+  width: 100%;
   background: $surface-alt;
   border: 1px solid $border;
   border-radius: $radius-sm;
@@ -73,11 +161,77 @@
 
   option { background: #1a1a2e; }
   &:focus { border-color: #0078d4; }
+  &:disabled { opacity: 0.45; cursor: not-allowed; }
+}
 
-  &:disabled {
-    opacity: 0.45;
+// ── Meditation voice preset list ──────────────────────────────
+.voiceList {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.voiceItem {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  width: 100%;
+  background: $surface-alt;
+  border: 1px solid $border;
+  border-radius: $radius-sm;
+  padding: 0.5rem 0.75rem;
+  text-align: left;
+  cursor: pointer;
+  transition: border-color 0.18s, background 0.18s;
+  font-family: $font;
+
+  &:hover:not(.unavailable) {
+    border-color: #0078d4;
+    background: rgba(0, 120, 212, 0.06);
+  }
+
+  &.active {
+    border-color: #0078d4;
+    background: rgba(0, 120, 212, 0.1);
+  }
+
+  &.unavailable {
+    opacity: 0.35;
     cursor: not-allowed;
   }
+}
+
+.voiceItemTop {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.voiceItemName {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: $text;
+}
+
+.voiceItemLang {
+  font-size: 0.7rem;
+  color: $muted;
+  background: $surface;
+  border: 1px solid $border;
+  border-radius: 3px;
+  padding: 0.05rem 0.35rem;
+  font-family: monospace;
+}
+
+.voiceItemBadge {
+  font-size: 0.75rem;
+  margin-left: auto;
+}
+
+.voiceItemDesc {
+  font-size: 0.75rem;
+  color: $muted;
+  line-height: 1.4;
 }
 
 // ── Sliders ───────────────────────────────────────────────────

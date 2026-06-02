@@ -1,17 +1,32 @@
 import { useCallback, useRef, useState } from 'react';
 
-// StreamElements free TTS API — returns real MP3, no auth required
-const API_BASE = 'https://api.streamelements.com/kappa/v2/speech';
-const API_VOICE = 'Brian'; // decent deep UK male voice
-const CHUNK_CHARS = 240;   // safe limit per API call
-const BATCH_SIZE = 4;      // parallel requests
+const API_BASE   = 'https://api.streamelements.com/kappa/v2/speech';
+const API_VOICE  = 'Brian';
+const CHUNK_CHARS = 240;
+const BATCH_SIZE  = 4;
+const TARGET_SR   = 22050; // WAV output sample rate (good quality, manageable file size)
+
+// ── Parse text into typed segments ────────────────────────────
+function parseSegments(raw) {
+  const parts = raw.split(/(\[PAUSE:\d+(?:\.\d+)?\])/i);
+  const segs = [];
+  for (const part of parts) {
+    const m = part.match(/^\[PAUSE:(\d+(?:\.\d+)?)\]$/i);
+    if (m) {
+      segs.push({ type: 'pause', minutes: parseFloat(m[1]) });
+    } else {
+      const text = part.replace(/\s+/g, ' ').trim();
+      if (text) segs.push({ type: 'text', text });
+    }
+  }
+  return segs;
+}
 
 // ── Split text into ≤CHUNK_CHARS segments at word boundaries ──
 function splitIntoChunks(text, maxLen) {
   const words = text.split(/\s+/);
   const chunks = [];
   let current = '';
-
   for (const word of words) {
     const candidate = current ? `${current} ${word}` : word;
     if (candidate.length > maxLen && current.length > 0) {
@@ -25,7 +40,7 @@ function splitIntoChunks(text, maxLen) {
   return chunks;
 }
 
-// ── Fetch one chunk from the API ──────────────────────────────
+// ── Fetch one speech chunk as MP3 blob ─────────────────────────
 async function fetchChunk(text, signal) {
   const url = `${API_BASE}?voice=${API_VOICE}&text=${encodeURIComponent(text)}`;
   const res = await fetch(url, { signal });
@@ -33,34 +48,39 @@ async function fetchChunk(text, signal) {
   return res.blob();
 }
 
-// ── Run fetches in parallel batches, preserving order ─────────
-async function fetchAllChunks(chunks, batchSize, onProgress, signal) {
-  const results = new Array(chunks.length);
+// ── Encode AudioBuffer → WAV blob (mono, 16-bit) ──────────────
+function audioBufferToWav(buf) {
+  const sr      = buf.sampleRate;
+  const len     = buf.length;
+  const ab      = new ArrayBuffer(44 + len * 2);
+  const view    = new DataView(ab);
+  const samples = buf.getChannelData(0);
 
-  for (let i = 0; i < chunks.length; i += batchSize) {
-    if (signal.aborted) throw new DOMException('Aborted', 'AbortError');
+  const ws = (o, s) => { for (let i = 0; i < s.length; i++) view.setUint8(o + i, s.charCodeAt(i)); };
+  ws(0, 'RIFF'); view.setUint32(4, 36 + len * 2, true);
+  ws(8, 'WAVE'); ws(12, 'fmt ');
+  view.setUint32(16, 16, true);   // PCM
+  view.setUint16(20,  1, true);   // format = PCM
+  view.setUint16(22,  1, true);   // mono
+  view.setUint32(24, sr, true);
+  view.setUint32(28, sr * 2, true);
+  view.setUint16(32,  2, true);
+  view.setUint16(34, 16, true);
+  ws(36, 'data'); view.setUint32(40, len * 2, true);
 
-    const batch = chunks.slice(i, i + batchSize);
-    const batchBlobs = await Promise.all(
-      batch.map(chunk => fetchChunk(chunk, signal))
-    );
-
-    for (let j = 0; j < batchBlobs.length; j++) {
-      results[i + j] = batchBlobs[j];
-    }
-
-    onProgress(Math.min(i + batchSize, chunks.length));
+  for (let i = 0; i < len; i++) {
+    const s = Math.max(-1, Math.min(1, samples[i]));
+    view.setInt16(44 + i * 2, s < 0 ? s * 0x8000 : s * 0x7FFF, true);
   }
 
-  return results;
+  return new Blob([ab], { type: 'audio/wav' });
 }
 
 // ── Trigger browser download ───────────────────────────────────
 function triggerDownload(blob, filename) {
   const url = URL.createObjectURL(blob);
   const a   = document.createElement('a');
-  a.href     = url;
-  a.download = filename;
+  a.href = url; a.download = filename;
   document.body.appendChild(a);
   a.click();
   document.body.removeChild(a);
@@ -69,41 +89,83 @@ function triggerDownload(blob, filename) {
 
 // ── Hook ──────────────────────────────────────────────────────
 export function useDownload() {
-  const [status,   setStatus]   = useState('idle');  // idle|loading|done|error
+  const [status,   setStatus]   = useState('idle');
   const [progress, setProgress] = useState({ done: 0, total: 0 });
   const [error,    setError]    = useState(null);
   const abortCtrl = useRef(null);
 
   const download = useCallback(async (rawText) => {
-    // Strip [PAUSE:N] markers; they can't be encoded in the API audio
-    const clean = rawText
-      .replace(/\[PAUSE:\d+(?:\.\d+)?\]/gi, ' ')
-      .replace(/\s+/g, ' ')
-      .trim();
-    if (!clean) return;
+    const segments = parseSegments(rawText);
+    if (!segments.length) return;
 
-    // Cancel any previous run
     abortCtrl.current?.abort();
     const ctrl = new AbortController();
     abortCtrl.current = ctrl;
-
     setStatus('loading');
     setError(null);
 
-    const chunks = splitIntoChunks(clean, CHUNK_CHARS);
-    setProgress({ done: 0, total: chunks.length });
+    // Pre-count all text chunks for progress bar
+    const allChunks = segments
+      .filter(s => s.type === 'text')
+      .flatMap(s => splitIntoChunks(s.text, CHUNK_CHARS));
+    setProgress({ done: 0, total: allChunks.length });
 
     try {
-      const blobs = await fetchAllChunks(
-        chunks,
-        BATCH_SIZE,
-        done => setProgress({ done, total: chunks.length }),
-        ctrl.signal
-      );
+      // AudioContext used only for decoding MP3 blobs
+      const audioCtx = new AudioContext();
 
-      // MP3 frames can be safely concatenated into one file
-      const combined = new Blob(blobs, { type: 'audio/mpeg' });
-      triggerDownload(combined, 'speech.mp3');
+      // Build timeline: [{startTime, audioBuffer}]
+      const timeline = [];
+      let currentTime = 0;
+      let doneCount   = 0;
+
+      for (const seg of segments) {
+        if (ctrl.signal.aborted) throw new DOMException('Aborted', 'AbortError');
+
+        if (seg.type === 'pause') {
+          // Advance time — OfflineAudioContext will render silence here naturally
+          currentTime += seg.minutes * 60;
+        } else {
+          const chunks = splitIntoChunks(seg.text, CHUNK_CHARS);
+
+          for (let i = 0; i < chunks.length; i += BATCH_SIZE) {
+            if (ctrl.signal.aborted) throw new DOMException('Aborted', 'AbortError');
+
+            const batch = chunks.slice(i, i + BATCH_SIZE);
+            const blobs = await Promise.all(batch.map(c => fetchChunk(c, ctrl.signal)));
+
+            for (const blob of blobs) {
+              const arrayBuf = await blob.arrayBuffer();
+              const decoded  = await audioCtx.decodeAudioData(arrayBuf);
+              timeline.push({ startTime: currentTime, buffer: decoded });
+              currentTime += decoded.duration;
+            }
+
+            doneCount += batch.length;
+            setProgress({ done: doneCount, total: allChunks.length });
+          }
+        }
+      }
+
+      await audioCtx.close();
+
+      if (currentTime === 0 || timeline.length === 0) return;
+
+      // Render all speech + silence into a single OfflineAudioContext
+      const totalFrames = Math.ceil(currentTime * TARGET_SR);
+      const offlineCtx  = new OfflineAudioContext(1, totalFrames, TARGET_SR);
+
+      for (const { startTime, buffer } of timeline) {
+        const src = offlineCtx.createBufferSource();
+        src.buffer = buffer;
+        // playbackRate = 1 → Web Audio API handles sample-rate conversion automatically
+        src.connect(offlineCtx.destination);
+        src.start(startTime);
+      }
+
+      const rendered = await offlineCtx.startRendering();
+      const wav      = audioBufferToWav(rendered);
+      triggerDownload(wav, 'speech.wav');
 
       setStatus('done');
       setTimeout(() => setStatus('idle'), 3000);

@@ -24,7 +24,7 @@ export const DEFAULT_STYLE_PROMPT =
   'Speak in a slow, deep, hypnotic tone like a calm hypnotherapist. ' +
   'Pause naturally between thoughts. Sound warm, grounded, and authoritative.';
 
-// ── Edge TTS voice priority (deep male US-English first) ──────
+// ── Edge TTS voice priority (deep male first) ─────────────────
 export const EDGE_VOICE_PRIORITY = [
   'Microsoft Guy Online (Natural) - English (United States)',
   'Microsoft Davis Online (Natural) - English (United States)',
@@ -36,24 +36,44 @@ export const EDGE_VOICE_PRIORITY = [
   'Microsoft Christopher Online (Natural) - English (United States)',
   'Microsoft Roger Online (Natural) - English (United States)',
   'Microsoft Steffan Online (Natural) - English (United States)',
+  'Microsoft Andrew Multilingual Online (Natural) - English (United States)',
+  'Microsoft Brian Multilingual Online (Natural) - English (United States)',
+  'Microsoft Ryan Online (Natural) - English (United Kingdom)',
+  'Microsoft Thomas Online (Natural) - English (United Kingdom)',
+  'Microsoft William Online (Natural) - English (Australia)',
 ];
+
+// ── Edge style defaults (used when no Anthropic key / as fallback) ──
+export const EDGE_STYLE_DEFAULTS = {
+  rate:                 '-20%',
+  pitch:                '-10%',
+  volume:               '+0%',
+  breakBetweenSentences:'900ms',
+  emphasis:             'moderate',
+};
+
+export const EDGE_DEFAULT_STYLE_PROMPT =
+  'Speak slowly and deeply, like a hypnotherapist guiding someone into relaxation. ' +
+  'Pause slightly between sentences. Use a calm, authoritative tone.';
 
 // ── localStorage helpers ──────────────────────────────────────
 const LS = {
-  ENGINE:      'tts_engine',
-  EL_VOICES:   'tts_el_voices',
-  EL_SELECTED: 'tts_el_selected',
-  EL_APIKEY:   'tts_el_apikey',
-  EL_RATE:     'tts_el_rate',
-  EL_PITCH:    'tts_el_pitch',
-  G_APIKEY:    'tts_g_apikey',
-  G_VOICE:     'tts_g_voice',
-  G_PROMPT:    'tts_g_prompt',
-  G_PITCH:     'tts_g_pitch',
-  G_RATE:      'tts_g_rate',
-  ED_VOICE:    'tts_ed_voice',
-  ED_RATE:     'tts_ed_rate',
-  ED_PITCH:    'tts_ed_pitch',
+  ENGINE:          'tts_engine',
+  EL_VOICES:       'tts_el_voices',
+  EL_SELECTED:     'tts_el_selected',
+  EL_APIKEY:       'tts_el_apikey',
+  EL_RATE:         'tts_el_rate',
+  EL_PITCH:        'tts_el_pitch',
+  G_APIKEY:        'tts_g_apikey',
+  G_VOICE:         'tts_g_voice',
+  G_PROMPT:        'tts_g_prompt',
+  G_PITCH:         'tts_g_pitch',
+  G_RATE:          'tts_g_rate',
+  ED_VOICE:        'tts_ed_voice',
+  ED_RATE:         'tts_ed_rate',
+  ED_PITCH:        'tts_ed_pitch',
+  ED_STYLE_PROMPT: 'tts_ed_style_prompt',
+  ANTHROPIC_KEY:   'tts_anthropic_key',
 };
 
 function lsGet(key, fallback) {
@@ -128,9 +148,62 @@ async function fetchGoogle(text, voiceName, apiKey, stylePrompt, pitch, speaking
     throw new Error(msg);
   }
 
-  const data   = await resp.json();
-  const bytes  = Uint8Array.from(atob(data.audioContent), c => c.charCodeAt(0));
+  const data  = await resp.json();
+  const bytes = Uint8Array.from(atob(data.audioContent), c => c.charCodeAt(0));
   return new Blob([bytes], { type: 'audio/mp3' });
+}
+
+// ── Edge SSML helpers ─────────────────────────────────────────
+
+function parseBreakMs(str) {
+  if (!str) return 900;
+  const ms = str.match(/^(\d+(?:\.\d+)?)ms$/i);
+  if (ms) return parseFloat(ms[1]);
+  const s  = str.match(/^(\d+(?:\.\d+)?)s$/i);
+  if (s)  return parseFloat(s[1]) * 1000;
+  return 900;
+}
+
+function ssmlRateToNum(rateStr) {
+  const m = rateStr?.match(/^([+-]?\d+(?:\.\d+)?)%$/);
+  if (!m) return 1.0;
+  return Math.max(0.1, 1.0 + parseFloat(m[1]) / 100);
+}
+
+function ssmlPitchToNum(pitchStr) {
+  const m = pitchStr?.match(/^([+-]?\d+(?:\.\d+)?)%$/);
+  if (!m) return 1.0;
+  return Math.max(0, Math.min(2, 1.0 + parseFloat(m[1]) / 100));
+}
+
+async function resolveEdgeStyle(prompt, apiKey) {
+  if (!apiKey || !prompt.trim()) return { ...EDGE_STYLE_DEFAULTS };
+
+  const resp = await fetch('https://api.anthropic.com/v1/messages', {
+    method: 'POST',
+    headers: {
+      'x-api-key':         apiKey,
+      'anthropic-version': '2023-06-01',
+      'content-type':      'application/json',
+    },
+    body: JSON.stringify({
+      model:      'claude-sonnet-4-20250514',
+      max_tokens: 200,
+      messages: [{
+        role:    'user',
+        content: `Convert this voice style instruction into SSML speech parameters. Return ONLY a JSON object, no explanation, no markdown.\nInstruction: '${prompt}'\n\nReturn this exact JSON structure:\n{\n  "rate": "-20%",\n  "pitch": "-10%",\n  "volume": "+0%",\n  "breakBetweenSentences": "900ms",\n  "emphasis": "moderate"\n}`,
+      }],
+    }),
+  });
+
+  if (!resp.ok) throw new Error(`Anthropic API error ${resp.status}`);
+
+  const data = await resp.json();
+  const raw  = data.content[0].text
+    .trim()
+    .replace(/^```(?:json)?\s*/i, '')
+    .replace(/\s*```$/i, '');
+  return { ...EDGE_STYLE_DEFAULTS, ...JSON.parse(raw) };
 }
 
 // ── Text → chunks ─────────────────────────────────────────────
@@ -150,36 +223,40 @@ function buildChunks(raw) {
 // ── Hook ──────────────────────────────────────────────────────
 export function useTTS() {
   // Engine toggle
-  const [engine,      setEngineState] = useState(() => lsStr(LS.ENGINE, 'elevenlabs'));
+  const [engine,          setEngineState]       = useState(() => lsStr(LS.ENGINE, 'elevenlabs'));
 
   // ElevenLabs state
-  const [elVoices,    setElVoicesState]  = useState(() => lsGet(LS.EL_VOICES,   EL_DEFAULT_VOICES));
-  const [elSelected,  setElSelectedState]= useState(() => lsGet(LS.EL_SELECTED, EL_DEFAULT_VOICES[0]));
-  const [elApiKey,    setElApiKeyState]  = useState(() => lsStr(LS.EL_APIKEY));
-  const [elRate,      setElRateState]    = useState(() => lsGet(LS.EL_RATE,   0.75));
-  const [elPitch,     setElPitchState]   = useState(() => lsGet(LS.EL_PITCH,  0.8));
+  const [elVoices,        setElVoicesState]     = useState(() => lsGet(LS.EL_VOICES,   EL_DEFAULT_VOICES));
+  const [elSelected,      setElSelectedState]   = useState(() => lsGet(LS.EL_SELECTED, EL_DEFAULT_VOICES[0]));
+  const [elApiKey,        setElApiKeyState]     = useState(() => lsStr(LS.EL_APIKEY));
+  const [elRate,          setElRateState]       = useState(() => lsGet(LS.EL_RATE,   0.75));
+  const [elPitch,         setElPitchState]      = useState(() => lsGet(LS.EL_PITCH,  0.8));
 
   // Google state
-  const [gApiKey,     setGApiKeyState]   = useState(() => lsStr(LS.G_APIKEY));
-  const [gVoice,      setGVoiceState]    = useState(() => lsStr(LS.G_VOICE, GOOGLE_VOICES[0].name));
-  const [gPrompt,     setGPromptState]   = useState(() => lsStr(LS.G_PROMPT) || DEFAULT_STYLE_PROMPT);
-  const [gPitch,      setGPitchState]    = useState(() => lsGet(LS.G_PITCH,  -2));
-  const [gRate,       setGRateState]     = useState(() => lsGet(LS.G_RATE,   0.85));
+  const [gApiKey,         setGApiKeyState]      = useState(() => lsStr(LS.G_APIKEY));
+  const [gVoice,          setGVoiceState]       = useState(() => lsStr(LS.G_VOICE, GOOGLE_VOICES[0].name));
+  const [gPrompt,         setGPromptState]      = useState(() => lsStr(LS.G_PROMPT) || DEFAULT_STYLE_PROMPT);
+  const [gPitch,          setGPitchState]       = useState(() => lsGet(LS.G_PITCH,  -2));
+  const [gRate,           setGRateState]        = useState(() => lsGet(LS.G_RATE,   0.85));
 
   // Edge TTS state
-  const [edVoices,    setEdVoices]       = useState([]);
-  const [edVoice,     setEdVoiceState]   = useState(() => lsStr(LS.ED_VOICE, ''));
-  const [edRate,      setEdRateState]    = useState(() => lsGet(LS.ED_RATE,  0.8));
-  const [edPitch,     setEdPitchState]   = useState(() => lsGet(LS.ED_PITCH, 0.9));
-  const [edWarn,      setEdWarn]         = useState('');
+  const [edVoices,        setEdVoices]          = useState([]);
+  const [edVoice,         setEdVoiceState]      = useState(() => lsStr(LS.ED_VOICE, ''));
+  const [edRate,          setEdRateState]       = useState(() => lsGet(LS.ED_RATE,  0.8));
+  const [edPitch,         setEdPitchState]      = useState(() => lsGet(LS.ED_PITCH, 0.9));
+  const [edWarn,          setEdWarn]            = useState('');
+  const [edStylePrompt,   setEdStylePromptState]= useState(() => lsStr(LS.ED_STYLE_PROMPT) || EDGE_DEFAULT_STYLE_PROMPT);
+  const [anthropicKey,    setAnthropicKeyState] = useState(() => lsStr(LS.ANTHROPIC_KEY));
+  const [edStyleParams,   setEdStyleParams]     = useState({ ...EDGE_STYLE_DEFAULTS });
+  const [edStyleStatus,   setEdStyleStatus]     = useState('idle'); // 'idle' | 'analyzing' | 'ready'
 
   // Playback state
-  const [status,        setStatus]        = useState('idle');
-  const [activeIndex,   setActiveIndex]   = useState(-1);
-  const [chunkProgress, setChunkProgress] = useState({ done: 0, total: 0 });
-  const [countdown,     setCountdown]     = useState(null);
-  const [chunks,        setChunks]        = useState([]);
-  const [error,         setError]         = useState(null);
+  const [status,          setStatus]            = useState('idle');
+  const [activeIndex,     setActiveIndex]       = useState(-1);
+  const [chunkProgress,   setChunkProgress]     = useState({ done: 0, total: 0 });
+  const [countdown,       setCountdown]         = useState(null);
+  const [chunks,          setChunks]            = useState([]);
+  const [error,           setError]             = useState(null);
 
   // ── Mutable refs ──────────────────────────────────────────
   const playing          = useRef(false);
@@ -196,37 +273,43 @@ export function useTTS() {
   const currentUtterance = useRef(null);
   const pendingNext      = useRef(null);
   const playFromRef      = useRef(null);
+  const styleParamsRef   = useRef(null);   // session cache for resolved SSML params
+  const styleCacheKeyRef = useRef('');     // tracks prompt+key used for cache
 
-  // Reflected-value refs (avoid stale closures inside async playFrom)
-  const engineRef    = useRef(engine);
-  const elSelRef     = useRef(elSelected);
-  const elApiRef     = useRef(elApiKey);
-  const elRateRef    = useRef(elRate);
-  const elPitchRef   = useRef(elPitch);
-  const gApiRef      = useRef(gApiKey);
-  const gVoiceRef    = useRef(gVoice);
-  const gPromptRef   = useRef(gPrompt);
-  const gPitchRef    = useRef(gPitch);
-  const gRateRef     = useRef(gRate);
-  const edVoiceRef   = useRef(edVoice);
-  const edVoicesRef  = useRef(edVoices);
-  const edRateRef    = useRef(edRate);
-  const edPitchRef   = useRef(edPitch);
+  // Reflected-value refs (avoid stale closures inside async callbacks)
+  const engineRef        = useRef(engine);
+  const elSelRef         = useRef(elSelected);
+  const elApiRef         = useRef(elApiKey);
+  const elRateRef        = useRef(elRate);
+  const elPitchRef       = useRef(elPitch);
+  const gApiRef          = useRef(gApiKey);
+  const gVoiceRef        = useRef(gVoice);
+  const gPromptRef       = useRef(gPrompt);
+  const gPitchRef        = useRef(gPitch);
+  const gRateRef         = useRef(gRate);
+  const edVoiceRef       = useRef(edVoice);
+  const edVoicesRef      = useRef(edVoices);
+  const edRateRef        = useRef(edRate);
+  const edPitchRef       = useRef(edPitch);
+  const edStylePromptRef = useRef(edStylePrompt);
+  const anthropicKeyRef  = useRef(anthropicKey);
 
-  engineRef.current  = engine;
-  elSelRef.current   = elSelected;
-  elApiRef.current   = elApiKey;
-  elRateRef.current  = elRate;
-  elPitchRef.current = elPitch;
-  gApiRef.current    = gApiKey;
-  gVoiceRef.current  = gVoice;
-  gPromptRef.current = gPrompt;
-  gPitchRef.current  = gPitch;
-  gRateRef.current   = gRate;
-  edVoiceRef.current  = edVoice;
-  edVoicesRef.current = edVoices;
-  edRateRef.current   = edRate;
-  edPitchRef.current  = edPitch;
+  engineRef.current        = engine;
+  elSelRef.current         = elSelected;
+  elApiRef.current         = elApiKey;
+  elRateRef.current        = elRate;
+  elPitchRef.current       = elPitch;
+  gApiRef.current          = gApiKey;
+  gVoiceRef.current        = gVoice;
+  gPromptRef.current       = gPrompt;
+  gPitchRef.current        = gPitch;
+  gRateRef.current         = gRate;
+  edVoiceRef.current       = edVoice;
+  edVoicesRef.current      = edVoices;
+  edRateRef.current        = edRate;
+  edPitchRef.current       = edPitch;
+  edStylePromptRef.current = edStylePrompt;
+  anthropicKeyRef.current  = anthropicKey;
 
   // ── Load Edge voices on mount ──────────────────────────────
   useEffect(() => {
@@ -234,7 +317,7 @@ export function useTTS() {
 
     function load() {
       const all     = speechSynthesis.getVoices();
-      if (all.length === 0) return; // not ready yet
+      if (all.length === 0) return;
       const natural = all.filter(v => v.name.includes('Online (Natural)'));
 
       if (natural.length === 0) {
@@ -284,6 +367,19 @@ export function useTTS() {
   const setEdVoice  = useCallback((v) => { setEdVoiceState(v);  lsSetStr(LS.ED_VOICE, v); }, []);
   const setEdRate   = useCallback((v) => { setEdRateState(v);   lsSet(LS.ED_RATE,  v); }, []);
   const setEdPitch  = useCallback((v) => { setEdPitchState(v);  lsSet(LS.ED_PITCH, v); }, []);
+
+  // Invalidate style cache when prompt or API key changes
+  const setEdStylePrompt = useCallback((p) => {
+    setEdStylePromptState(p);
+    lsSetStr(LS.ED_STYLE_PROMPT, p);
+    styleParamsRef.current = null;
+  }, []);
+
+  const setAnthropicKey = useCallback((k) => {
+    setAnthropicKeyState(k);
+    lsSetStr(LS.ANTHROPIC_KEY, k);
+    styleParamsRef.current = null;
+  }, []);
 
   const selectElVoice = useCallback((v) => {
     setElSelectedState(v);
@@ -383,11 +479,14 @@ export function useTTS() {
 
     // ── Edge TTS (Web Speech API) path ───────────────────────
     if (engineRef.current === 'edge') {
-      const voice = edVoicesRef.current.find(v => v.name === edVoiceRef.current) ?? null;
-      const utt   = new SpeechSynthesisUtterance(chunk.text);
+      const params  = styleParamsRef.current ?? EDGE_STYLE_DEFAULTS;
+      const voice   = edVoicesRef.current.find(v => v.name === edVoiceRef.current) ?? null;
+      const breakMs = parseBreakMs(params.breakBetweenSentences);
+
+      const utt = new SpeechSynthesisUtterance(chunk.text);
       if (voice) utt.voice = voice;
-      utt.rate  = Math.max(0.5, Math.min(2, edRateRef.current));
-      utt.pitch = Math.max(0,   Math.min(2, edPitchRef.current));
+      utt.rate  = ssmlRateToNum(params.rate);
+      utt.pitch = ssmlPitchToNum(params.pitch);
       currentUtterance.current = utt;
 
       utt.onend = () => {
@@ -400,7 +499,7 @@ export function useTTS() {
           const next = pendingNext.current;
           pendingNext.current = null;
           if (next !== null) playFromRef.current(next);
-        }, 1000);
+        }, breakMs);
       };
 
       utt.onerror = (e) => {
@@ -499,6 +598,34 @@ export function useTTS() {
     setStatus('playing');
     setActiveIndex(-1);
 
+    if (engineRef.current === 'edge') {
+      const cacheKey = `${anthropicKeyRef.current}||${edStylePromptRef.current}`;
+      if (styleParamsRef.current && styleCacheKeyRef.current === cacheKey) {
+        // Cache hit — start immediately
+        setTimeout(() => playFromRef.current(0), 100);
+      } else {
+        // Resolve style via Claude (or use defaults if no key)
+        setEdStyleStatus('analyzing');
+        resolveEdgeStyle(edStylePromptRef.current, anthropicKeyRef.current)
+          .then(params => {
+            styleParamsRef.current   = params;
+            styleCacheKeyRef.current = cacheKey;
+            setEdStyleParams(params);
+            setEdStyleStatus('ready');
+            if (playing.current) setTimeout(() => playFromRef.current(0), 100);
+          })
+          .catch(() => {
+            const fallback = { ...EDGE_STYLE_DEFAULTS };
+            styleParamsRef.current   = fallback;
+            styleCacheKeyRef.current = cacheKey;
+            setEdStyleParams(fallback);
+            setEdStyleStatus('ready');
+            if (playing.current) setTimeout(() => playFromRef.current(0), 100);
+          });
+      }
+      return;
+    }
+
     setTimeout(() => playFromRef.current(0), 100);
   }, [stopCountdown]);
 
@@ -527,7 +654,6 @@ export function useTTS() {
     paused.current = false;
     setStatus('playing');
 
-    // Mid-countdown: restart from where it left off
     if (countdownRem.current > 0 && countdown !== null) {
       startCountdown(countdownRem.current, () => {
         if (playing.current) playFromRef.current(chunkIdx.current + 1);
@@ -535,7 +661,6 @@ export function useTTS() {
       return;
     }
 
-    // Audio/utterance ended while paused: fire gap timer then advance
     if (pendingNext.current !== null) {
       const next = pendingNext.current;
       pendingNext.current = null;
@@ -550,7 +675,6 @@ export function useTTS() {
       return;
     }
 
-    // Audio paused mid-sentence: resume it
     if (pausedAudio.current) {
       currentAudio.current = pausedAudio.current;
       pausedAudio.current  = null;
@@ -558,7 +682,6 @@ export function useTTS() {
       return;
     }
 
-    // Paused during fetch: re-fetch current chunk
     if (playing.current) playFromRef.current(chunkIdx.current);
   }, [countdown, startCountdown]);
 
@@ -576,7 +699,8 @@ export function useTTS() {
     setActiveIndex(-1);
     setChunkProgress({ done: 0, total: 0 });
     setChunks([]);
-  }, [stopCountdown]);
+    if (edStyleStatus === 'analyzing') setEdStyleStatus('idle');
+  }, [stopCountdown, edStyleStatus]);
 
   const skipPause = useCallback(() => { skipRef.current = true; }, []);
 
@@ -594,6 +718,9 @@ export function useTTS() {
     // Edge
     edVoices, edVoice, edRate, edPitch, edWarn,
     setEdVoice, setEdRate, setEdPitch,
+    edStylePrompt, setEdStylePrompt,
+    anthropicKey,  setAnthropicKey,
+    edStyleParams, edStyleStatus,
     // Playback
     status, activeIndex, chunkProgress, countdown, chunks, error,
     play, pause, resume, stop, skipPause,

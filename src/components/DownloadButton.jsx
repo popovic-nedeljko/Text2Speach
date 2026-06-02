@@ -17,7 +17,7 @@ export default function DownloadButton({ status, progress, error, onDownload, on
               <div className={styles.barFill} style={{ width: `${pct}%` }} />
             </div>
             <span className={styles.barLabel}>
-              Generating MP3… {progress.done}/{progress.total}
+              Generating audio… {progress.done}/{progress.total}
             </span>
           </div>
           <button className={styles.cancelBtn} onClick={onCancel}>
@@ -30,9 +30,9 @@ export default function DownloadButton({ status, progress, error, onDownload, on
           onClick={onDownload}
           disabled={disabled || isLoading}
         >
-          {isDone  ? '✓ Downloaded!'  :
-           isError ? '↓ Retry MP3'   :
-                     '↓ Download MP3'}
+          {isDone  ? '✓ Downloaded!'   :
+           isError ? '↓ Retry WAV'   :
+                     '↓ Download WAV'}
         </button>
       )}
 
@@ -43,7 +43,7 @@ export default function DownloadButton({ status, progress, error, onDownload, on
       )}
 
       <p className={styles.note}>
-        Note: [PAUSE] markers are skipped in the audio file.
+        Downloads as WAV · [PAUSE] markers render as real silence
       </p>
     </div>
   );
