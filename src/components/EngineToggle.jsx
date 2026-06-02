@@ -11,10 +11,10 @@ export default function EngineToggle({ engine, onChange }) {
       <span className={styles.label}>Voice Engine</span>
       <div className={styles.group}>
         <button
-          className={`${styles.btn} ${engine === 'elevenlabs' ? styles.active : ''}`}
-          onClick={() => onChange('elevenlabs')}
+          className={`${styles.btn} ${engine === 'edge' ? styles.active : ''}`}
+          onClick={() => onChange('edge')}
         >
-          ElevenLabs
+          Edge TTS
         </button>
         <button
           className={`${styles.btn} ${engine === 'google' ? styles.active : ''}`}
@@ -23,10 +23,10 @@ export default function EngineToggle({ engine, onChange }) {
           Google Gemini
         </button>
         <button
-          className={`${styles.btn} ${engine === 'edge' ? styles.active : ''}`}
-          onClick={() => onChange('edge')}
+          className={`${styles.btn} ${engine === 'elevenlabs' ? styles.active : ''}`}
+          onClick={() => onChange('elevenlabs')}
         >
-          Edge TTS
+          ElevenLabs
         </button>
       </div>
       <span className={styles.badge}>{badge}</span>
