@@ -12,6 +12,7 @@ import DownloadButton from './components/DownloadButton';
 import EngineToggle from './components/EngineToggle';
 import ElevenLabsPanel from './components/ElevenLabsPanel';
 import GooglePanel from './components/GooglePanel';
+import EdgePanel from './components/EdgePanel';
 import styles from './App.module.scss';
 
 export default function App() {
@@ -94,7 +95,7 @@ export default function App() {
             onApiKeyChange={tts.setElApiKey}
           />
         </>
-      ) : (
+      ) : tts.engine === 'google' ? (
         <GooglePanel
           apiKey={tts.gApiKey}
           voice={tts.gVoice}
@@ -106,6 +107,17 @@ export default function App() {
           onPromptChange={tts.setGPrompt}
           onPitchChange={tts.setGPitch}
           onRateChange={tts.setGRate}
+        />
+      ) : (
+        <EdgePanel
+          voices={tts.edVoices}
+          selectedVoice={tts.edVoice}
+          rate={tts.edRate}
+          pitch={tts.edPitch}
+          warn={tts.edWarn}
+          onVoiceChange={tts.setEdVoice}
+          onRateChange={tts.setEdRate}
+          onPitchChange={tts.setEdPitch}
         />
       )}
 

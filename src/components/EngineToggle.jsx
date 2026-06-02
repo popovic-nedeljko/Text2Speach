@@ -1,6 +1,11 @@
 import styles from './EngineToggle.module.scss';
 
 export default function EngineToggle({ engine, onChange }) {
+  const badge =
+    engine === 'google' ? 'Gemini 3.1 Flash' :
+    engine === 'edge'   ? 'Free · Neural'     :
+                          'Turbo v2.5';
+
   return (
     <div className={styles.wrap}>
       <span className={styles.label}>Voice Engine</span>
@@ -17,10 +22,14 @@ export default function EngineToggle({ engine, onChange }) {
         >
           Google Gemini
         </button>
+        <button
+          className={`${styles.btn} ${engine === 'edge' ? styles.active : ''}`}
+          onClick={() => onChange('edge')}
+        >
+          Edge TTS
+        </button>
       </div>
-      <span className={styles.badge}>
-        {engine === 'google' ? 'Gemini 3.1 Flash' : 'Turbo v2.5'}
-      </span>
+      <span className={styles.badge}>{badge}</span>
     </div>
   );
 }

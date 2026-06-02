@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 
 // ── ElevenLabs defaults ───────────────────────────────────────
 export const EL_DEFAULT_VOICES = [
@@ -24,6 +24,20 @@ export const DEFAULT_STYLE_PROMPT =
   'Speak in a slow, deep, hypnotic tone like a calm hypnotherapist. ' +
   'Pause naturally between thoughts. Sound warm, grounded, and authoritative.';
 
+// ── Edge TTS voice priority (deep male US-English first) ──────
+export const EDGE_VOICE_PRIORITY = [
+  'Microsoft Guy Online (Natural) - English (United States)',
+  'Microsoft Davis Online (Natural) - English (United States)',
+  'Microsoft Tony Online (Natural) - English (United States)',
+  'Microsoft Jason Online (Natural) - English (United States)',
+  'Microsoft Eric Online (Natural) - English (United States)',
+  'Microsoft Andrew Online (Natural) - English (United States)',
+  'Microsoft Brian Online (Natural) - English (United States)',
+  'Microsoft Christopher Online (Natural) - English (United States)',
+  'Microsoft Roger Online (Natural) - English (United States)',
+  'Microsoft Steffan Online (Natural) - English (United States)',
+];
+
 // ── localStorage helpers ──────────────────────────────────────
 const LS = {
   ENGINE:      'tts_engine',
@@ -37,6 +51,9 @@ const LS = {
   G_PROMPT:    'tts_g_prompt',
   G_PITCH:     'tts_g_pitch',
   G_RATE:      'tts_g_rate',
+  ED_VOICE:    'tts_ed_voice',
+  ED_RATE:     'tts_ed_rate',
+  ED_PITCH:    'tts_ed_pitch',
 };
 
 function lsGet(key, fallback) {
@@ -149,6 +166,13 @@ export function useTTS() {
   const [gPitch,      setGPitchState]    = useState(() => lsGet(LS.G_PITCH,  -2));
   const [gRate,       setGRateState]     = useState(() => lsGet(LS.G_RATE,   0.85));
 
+  // Edge TTS state
+  const [edVoices,    setEdVoices]       = useState([]);
+  const [edVoice,     setEdVoiceState]   = useState(() => lsStr(LS.ED_VOICE, ''));
+  const [edRate,      setEdRateState]    = useState(() => lsGet(LS.ED_RATE,  0.8));
+  const [edPitch,     setEdPitchState]   = useState(() => lsGet(LS.ED_PITCH, 0.9));
+  const [edWarn,      setEdWarn]         = useState('');
+
   // Playback state
   const [status,        setStatus]        = useState('idle');
   const [activeIndex,   setActiveIndex]   = useState(-1);
@@ -158,19 +182,20 @@ export function useTTS() {
   const [error,         setError]         = useState(null);
 
   // ── Mutable refs ──────────────────────────────────────────
-  const playing      = useRef(false);
-  const paused       = useRef(false);
-  const chunkIdx     = useRef(0);
-  const chunksRef    = useRef([]);
-  const gapTimer     = useRef(null);
-  const countdownInt = useRef(null);
-  const skipRef      = useRef(false);
-  const countdownRem = useRef(0);
-  const fetchAbort   = useRef(null);
-  const currentAudio = useRef(null);  // Audio playing right now
-  const pausedAudio  = useRef(null);  // Audio paused mid-sentence
-  const pendingNext  = useRef(null);  // next chunk index after sentence ends + gap
-  const playFromRef  = useRef(null);  // self-ref for async recursion
+  const playing          = useRef(false);
+  const paused           = useRef(false);
+  const chunkIdx         = useRef(0);
+  const chunksRef        = useRef([]);
+  const gapTimer         = useRef(null);
+  const countdownInt     = useRef(null);
+  const skipRef          = useRef(false);
+  const countdownRem     = useRef(0);
+  const fetchAbort       = useRef(null);
+  const currentAudio     = useRef(null);
+  const pausedAudio      = useRef(null);
+  const currentUtterance = useRef(null);
+  const pendingNext      = useRef(null);
+  const playFromRef      = useRef(null);
 
   // Reflected-value refs (avoid stale closures inside async playFrom)
   const engineRef    = useRef(engine);
@@ -183,6 +208,10 @@ export function useTTS() {
   const gPromptRef   = useRef(gPrompt);
   const gPitchRef    = useRef(gPitch);
   const gRateRef     = useRef(gRate);
+  const edVoiceRef   = useRef(edVoice);
+  const edVoicesRef  = useRef(edVoices);
+  const edRateRef    = useRef(edRate);
+  const edPitchRef   = useRef(edPitch);
 
   engineRef.current  = engine;
   elSelRef.current   = elSelected;
@@ -194,6 +223,48 @@ export function useTTS() {
   gPromptRef.current = gPrompt;
   gPitchRef.current  = gPitch;
   gRateRef.current   = gRate;
+  edVoiceRef.current  = edVoice;
+  edVoicesRef.current = edVoices;
+  edRateRef.current   = edRate;
+  edPitchRef.current  = edPitch;
+
+  // ── Load Edge voices on mount ──────────────────────────────
+  useEffect(() => {
+    if (typeof speechSynthesis === 'undefined') return;
+
+    function load() {
+      const all     = speechSynthesis.getVoices();
+      if (all.length === 0) return; // not ready yet
+      const natural = all.filter(v => v.name.includes('Online (Natural)'));
+
+      if (natural.length === 0) {
+        setEdWarn('No Microsoft neural voices found. Open this page in Microsoft Edge for the best results.');
+        setEdVoices([]);
+        return;
+      }
+
+      setEdWarn('');
+      const sorted = [...natural].sort((a, b) => {
+        const ai = EDGE_VOICE_PRIORITY.indexOf(a.name);
+        const bi = EDGE_VOICE_PRIORITY.indexOf(b.name);
+        if (ai !== -1 && bi !== -1) return ai - bi;
+        if (ai !== -1) return -1;
+        if (bi !== -1) return 1;
+        return a.name.localeCompare(b.name);
+      });
+      setEdVoices(sorted);
+      setEdVoiceState(prev => {
+        if (prev && sorted.some(v => v.name === prev)) return prev;
+        const def = sorted[0]?.name ?? '';
+        lsSetStr(LS.ED_VOICE, def);
+        return def;
+      });
+    }
+
+    load();
+    speechSynthesis.addEventListener('voiceschanged', load);
+    return () => speechSynthesis.removeEventListener('voiceschanged', load);
+  }, []);
 
   // ── Setters (with localStorage sync) ─────────────────────
 
@@ -210,6 +281,9 @@ export function useTTS() {
   const setElPitch  = useCallback((v) => { setElPitchState(v);  lsSet(LS.EL_PITCH, v); }, []);
   const setGPitch   = useCallback((v) => { setGPitchState(v);   lsSet(LS.G_PITCH,  v); }, []);
   const setGRate    = useCallback((v) => { setGRateState(v);    lsSet(LS.G_RATE,   v); }, []);
+  const setEdVoice  = useCallback((v) => { setEdVoiceState(v);  lsSetStr(LS.ED_VOICE, v); }, []);
+  const setEdRate   = useCallback((v) => { setEdRateState(v);   lsSet(LS.ED_RATE,  v); }, []);
+  const setEdPitch  = useCallback((v) => { setEdPitchState(v);  lsSet(LS.ED_PITCH, v); }, []);
 
   const selectElVoice = useCallback((v) => {
     setElSelectedState(v);
@@ -264,12 +338,14 @@ export function useTTS() {
     countdownInt.current = setInterval(tick, 1000);
   }, [stopCountdown]);
 
-  // ── Audio teardown ─────────────────────────────────────────
+  // ── Audio / utterance teardown ─────────────────────────────
 
   function killAudio() {
     for (const ref of [currentAudio, pausedAudio]) {
       if (ref.current) { ref.current.pause(); ref.current.src = ''; ref.current = null; }
     }
+    try { speechSynthesis.cancel(); } catch {}
+    currentUtterance.current = null;
   }
 
   // ── Core: play chunk at index (async) ─────────────────────
@@ -305,6 +381,39 @@ export function useTTS() {
 
     setActiveIndex(chunk.index);
 
+    // ── Edge TTS (Web Speech API) path ───────────────────────
+    if (engineRef.current === 'edge') {
+      const voice = edVoicesRef.current.find(v => v.name === edVoiceRef.current) ?? null;
+      const utt   = new SpeechSynthesisUtterance(chunk.text);
+      if (voice) utt.voice = voice;
+      utt.rate  = Math.max(0.5, Math.min(2, edRateRef.current));
+      utt.pitch = Math.max(0,   Math.min(2, edPitchRef.current));
+      currentUtterance.current = utt;
+
+      utt.onend = () => {
+        currentUtterance.current = null;
+        if (!playing.current) return;
+        pendingNext.current = index + 1;
+        if (paused.current) return;
+        gapTimer.current = setTimeout(() => {
+          if (!playing.current || paused.current) return;
+          const next = pendingNext.current;
+          pendingNext.current = null;
+          if (next !== null) playFromRef.current(next);
+        }, 1000);
+      };
+
+      utt.onerror = (e) => {
+        currentUtterance.current = null;
+        if (e.error === 'interrupted' || e.error === 'canceled') return;
+        if (playing.current && !paused.current) playFromRef.current(index + 1);
+      };
+
+      if (!paused.current) speechSynthesis.speak(utt);
+      return;
+    }
+
+    // ── Fetch TTS (ElevenLabs / Google) path ─────────────────
     const abort = new AbortController();
     fetchAbort.current = abort;
 
@@ -330,7 +439,7 @@ export function useTTS() {
       return;
     }
 
-    if (!playing.current) return; // stopped while fetching
+    if (!playing.current) return;
 
     const url   = URL.createObjectURL(blob);
     const audio = new Audio(url);
@@ -341,7 +450,6 @@ export function useTTS() {
       currentAudio.current = null;
       if (!playing.current) return;
 
-      // Record next index — either fires the gap timer now or waits for resume
       pendingNext.current = index + 1;
       if (paused.current) return;
 
@@ -360,7 +468,6 @@ export function useTTS() {
     };
 
     if (paused.current) {
-      // Fetch finished while paused — hold audio for resume
       pausedAudio.current = audio;
     } else {
       audio.play().catch(() => {
@@ -398,16 +505,20 @@ export function useTTS() {
   const pause = useCallback(() => {
     if (!playing.current || paused.current) return;
     paused.current = true;
-    fetchAbort.current?.abort();    // abort in-flight fetch; re-fetched on resume
-    clearTimeout(gapTimer.current); // pendingNext stays set if audio already ended
+    clearTimeout(gapTimer.current);
+    if (countdownInt.current) { clearInterval(countdownInt.current); countdownInt.current = null; }
 
-    if (currentAudio.current && !currentAudio.current.paused) {
-      currentAudio.current.pause();
-      pausedAudio.current  = currentAudio.current;
-      currentAudio.current = null;
+    if (engineRef.current === 'edge') {
+      try { speechSynthesis.pause(); } catch {}
+    } else {
+      fetchAbort.current?.abort();
+      if (currentAudio.current && !currentAudio.current.paused) {
+        currentAudio.current.pause();
+        pausedAudio.current  = currentAudio.current;
+        currentAudio.current = null;
+      }
     }
 
-    if (countdownInt.current) { clearInterval(countdownInt.current); countdownInt.current = null; }
     setStatus('paused');
   }, []);
 
@@ -416,7 +527,7 @@ export function useTTS() {
     paused.current = false;
     setStatus('playing');
 
-    // Mid-countdown: restart it from where it left off
+    // Mid-countdown: restart from where it left off
     if (countdownRem.current > 0 && countdown !== null) {
       startCountdown(countdownRem.current, () => {
         if (playing.current) playFromRef.current(chunkIdx.current + 1);
@@ -424,7 +535,7 @@ export function useTTS() {
       return;
     }
 
-    // Audio ended while paused: fire gap timer then advance
+    // Audio/utterance ended while paused: fire gap timer then advance
     if (pendingNext.current !== null) {
       const next = pendingNext.current;
       pendingNext.current = null;
@@ -434,7 +545,12 @@ export function useTTS() {
       return;
     }
 
-    // Audio was paused mid-sentence: resume it
+    if (engineRef.current === 'edge') {
+      try { speechSynthesis.resume(); } catch {}
+      return;
+    }
+
+    // Audio paused mid-sentence: resume it
     if (pausedAudio.current) {
       currentAudio.current = pausedAudio.current;
       pausedAudio.current  = null;
@@ -475,6 +591,9 @@ export function useTTS() {
     // Google
     gApiKey, gVoice, gPrompt, gPitch, gRate,
     setGApiKey, setGVoice, setGPrompt, setGPitch, setGRate,
+    // Edge
+    edVoices, edVoice, edRate, edPitch, edWarn,
+    setEdVoice, setEdRate, setEdPitch,
     // Playback
     status, activeIndex, chunkProgress, countdown, chunks, error,
     play, pause, resume, stop, skipPause,
